@@ -78,8 +78,6 @@ def main(data_dir: str, action: str = 'score', filter_score: float = 0.75, out_f
                         continue
                     work.extend((len(articles), text) for text in texts)
                     articles.append(article)
-            if len(work) > 0:
-                break
 
     print(f"{len(work)=}")
     outputs = run_async_in_batches(
