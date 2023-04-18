@@ -40,19 +40,15 @@ def prepare_triplet(subject_entity, object_entity, article_text, predicate):
     text_triplet += re.compile("(?<!\d)\.(?!\d)").split(article_text[:min(subject_entity['boundaries'][0], object_entity['boundaries'][0])])[-1]
     text_triplet += article_text[min(subject_entity['boundaries'][0], object_entity['boundaries'][0]):max(subject_entity['boundaries'][1], object_entity['boundaries'][1])]
     text_triplet += re.compile("(?<!\d)\.(?!\d)").split(article_text[max(subject_entity['boundaries'][1], object_entity['boundaries'][1]):])[0]
-    if language == 'ko' or language == 'kosource':
-        return (text_triplet.strip('\n'), ' '.join([str(subject_entity['surfaceform']), str(object_entity['surfaceform']), str(predicate['surfaceform'])]))
+    #if language == 'ko' or language == 'kosource':
+    #    return (text_triplet.strip('\n'), ' '.join([str(subject_entity['surfaceform']), str(object_entity['surfaceform']), str(predicate['surfaceform'])]))
     #     return (text_triplet.strip('\n'), ' '.join([str(object_entity['surfaceform']), str(predicate['surfaceform']), str(subject_entity['surfaceform'])]))
     return (text_triplet.strip('\n'), ' '.join([str(subject_entity['surfaceform']), str(predicate['surfaceform']), str(object_entity['surfaceform'])]))
 
 def main(folder_input = 'out/ko'):
     global language 
     language = folder_input.split('/')[1]
-    if language == 'ko' or language == 'kosource':
-        model_name_or_path = '/home/huguetcabot/sentence_transformers/test-glue/XNLI'
-        # model_name_or_path = '/home/huguetcabot/sentence_transformers/test-glue/run-1/checkpoint-3910'
-    else:
-        model_name_or_path = 'joeddav/xlm-roberta-large-xnli'
+    model_name_or_path = 'MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7'
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_name_or_path)

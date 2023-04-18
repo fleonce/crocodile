@@ -1,4 +1,6 @@
 import multiprocessing
+import time
+
 from pipeline.entitylinker import *
 from pipeline.triplealigner import *
 from pipeline.datareader import WikiDataAbstractsDataReader
@@ -9,7 +11,7 @@ import argparse
 from timeit import default_timer
 
 __START_DOC__ = 0   #start reading from document number
-__CORES__ = 7
+__CORES__ = multiprocessing.cpu_count() * 4
 
 parser = argparse.ArgumentParser(prog=os.path.basename(sys.argv[0]),
                                     formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -29,17 +31,11 @@ reader = WikiDataAbstractsDataReader(args.input)
 main_ent_lim = MainEntityLimiter()
 min_ent_lim = EntityLimiter(2, 100)
 min_trip_lim = MinTriplesLimiter(1)
+sparql_iwas = SparqlIrgendwas(args.language)
 # min_trip_lim = TriplesLimiter(5, 500)
 
 filter_entities = ['Q4167410', 'Q13406463', 'Q18340514', 'Q12308941', 'Q11879590', 'Q101352']
 
-# trip_read = TripleSPARQLReader('./datasets/wikidata/wikidata-triples.csv')
-if args.input_triples.endswith('.db'):
-    trip_read = TripleDBReader(args.input_triples, args.language)
-else: 
-    trip_read = TripleCSVReader(args.input_triples, args.language)
-Salign = SimpleAligner(trip_read)
-#prop = WikidataPropertyLinker('./datasets/wikidata/wikidata-properties.csv')
 if args.language == 'zh':
     spacy_model = 'zh_core_web_sm'
 elif args.language == 'en':
@@ -55,32 +51,39 @@ else:
 date = DateLinkerRegex(args.language)
 
 #SPOalign = SPOAligner(trip_read)
-NSalign = NoSubjectAlign(trip_read)
 # writer = JsonlWriter(args.output, "re-nlg", filesize=5000, startfile=__START_DOC__)
 nextFile = NextFile(args.output)
 output = OutputSplitter(nextFile, 5000, False)
 
-def multhithreadprocess(q, output_queue):
-    while True:
-        d = q.get()
-        if d is None:
-            break
-        if trip_read.get_exists(d.uri, 'P31', filter_entities):
-            continue
-        d = date.run(d)
-        # d = date.run(d)
-        if not main_ent_lim.run(d):
-            # output_queue.put('skip')
-            continue
-        if not min_ent_lim.run(d):
-            # output_queue.put('skip')
-            continue
-        d = NSalign.run(d)
-        d = Salign.run(d)
-        if not min_trip_lim.run(d):
-            # output_queue.put('skip')
-            continue
-        output_queue.put(d)
+def multhithreadprocess(rank, q, output_queue):
+    with TripleDBReader(args.input_triples, sparql_iwas) as trip_read:
+    # trip_read = TripleDBReader(args.input_triples, args.language)
+        Salign = SimpleAligner(trip_read)
+        NSalign = NoSubjectAlign(trip_read)
+
+        while True:
+            d = q.get()
+            if d is None:
+                break
+            start = time.time()
+            if trip_read.get_exists(d.uri, 'P31', filter_entities):
+                continue
+            d = date.run(d)
+            # d = date.run(d)
+            if not main_ent_lim.run(d):
+                # output_queue.put('skip')
+                continue
+            if not min_ent_lim.run(d):
+                # output_queue.put('skip')
+                continue
+            d = NSalign.run(d)
+            d = Salign.run(d)
+            if not min_trip_lim.run(d):
+                # output_queue.put('skip')
+                continue
+            end = time.time()
+            # print(f"{rank=} {end - start=}")
+            output_queue.put(d)
         
 def reduce_process(output_queue, output):
     """Pull finished article text, write series of files (or stdout)
@@ -88,7 +91,7 @@ def reduce_process(output_queue, output):
     :param output: file object where to print.
     """
     print('reduce_process')
-    period = 5000
+    period = 1000
     interval_start = default_timer()
     # FIXME: use a heap
     ordering_buffer = {}  # collected pages
@@ -122,9 +125,9 @@ if __name__ == '__main__':
         # iolock = ctx.Lock()
         # pool = ctx.Pool(__CORES__, initializer=multhithreadprocess, initargs=(q, writer_output))
         workers = []
-        for _ in range(max(1, __CORES__)):
+        for i in range(max(1, __CORES__)):
             extractor = multiprocessing.Process(target=multhithreadprocess,
-                                args=(q, output_queue))
+                                args=(i, q, output_queue))
             extractor.daemon = True  # only live while parent process lives
             extractor.start()
             workers.append(extractor)

@@ -63,9 +63,10 @@ class TripleCSVReader:
                 return True
         return False
 
-class TripleDBReader:
 
-    def __init__(self, triples_file, language):
+class SparqlIrgendwas:
+
+    def __init__(self, language):
         self.d_properties = defaultdict(list)
         endpoint_url = "https://query.wikidata.org/sparql"
         user_agent = "WDQS-example Python/%s.%s" % (sys.version_info[0], sys.version_info[1])
@@ -80,14 +81,27 @@ class TripleDBReader:
             print(query)
         for result in results["results"]["bindings"]:
             self.d_properties[result['pName']['value']] = result['propertyLabel']['value']
+
+
+class TripleDBReader:
+
+    def __init__(self, triples_file, sparql_iwas):
+        self.d_properties = sparql_iwas.d_properties
         self._path_to_db = triples_file
+
+    def __enter__(self):
+        self._connection = sqlite3.connect(self._path_to_db)
+        return self
+
+    def __exit__(self, *args, **kwargs):
+        self._connection.commit()
+        self._connection.close()
 
     def get(self, suri, objuri):
         # with sqlite3.connect(self._path_to_db) as conn:
-        with sqlite3.connect(self._path_to_db) as conn:
-            c = conn.cursor()
-            c.execute("SELECT relation FROM triplets WHERE subjobj=?", (suri.uri+'\t'+objuri.uri,))
-            results = c.fetchall()
+        c = self._connection.cursor()
+        c.execute("SELECT relation FROM triplets WHERE subjobj=?", (suri.uri+'\t'+objuri.uri,))
+        results = c.fetchall()
         if len(results) > 0:
             return [result[0] for result in results]
         else:
