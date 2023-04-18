@@ -25,6 +25,7 @@ def gpu_nli(
     while batch := queue_in.get():
         texts = [item[1] for item in batch]
         articles = [item[0] for item in batch]
+        indices = [item[2] for item in batch]
         # print(texts[0])
         inputs = tokenizer(texts, return_tensors="pt", max_length=256, padding="longest", truncation=True)
         inputs = inputs.to(rank)
@@ -34,7 +35,7 @@ def gpu_nli(
 
         scores = outputs.logits.softmax(dim=-1)
         scores = scores[..., model.config.label2id['entailment']]
-        queue_out.put(Batch.from_batch(batch, list(zip(articles, scores.tolist()))))
+        queue_out.put(Batch.from_batch(batch, list(zip(articles, scores.tolist(), indices))))
     return True
 
 
@@ -52,13 +53,15 @@ def main(data_dir: str, action: str = 'score', filter_score: float = 0.75, out_f
                     previous = []
                     triples_list = []
                     texts = []
-                    for triple in article['triples']:
+                    indices = []
+                    for triple_id, triple in enumerate(article['triples']):
                         if triple['subject']['boundaries'] != None and triple['object']['boundaries'] != None and (
                         triple['subject']['boundaries'], triple['object']['boundaries']) not in previous:
                             previous.append((triple['subject']['boundaries'], triple['object']['boundaries']))
                             triples_list.append(triple)
                             texts.append(prepare_triplet(triple['subject'], triple['object'], article['text'],
                                                          triple["predicate"]))
+                            indices.append(triple_id)
                         elif (triple['subject']['boundaries'], triple['object']['boundaries']) not in previous:
                             distance = 1000000
                             for entity in article['entities']:
@@ -73,10 +76,12 @@ def main(data_dir: str, action: str = 'score', filter_score: float = 0.75, out_f
                             triples_list.append(triple)
                             texts.append(prepare_triplet(subject_entity, triple['object'], article['text'],
                                                          triple["predicate"]))
+                            indices.append(triple_id)
 
                     if len(texts) == 0:
                         continue
-                    work.extend((len(articles), text) for text in texts)
+                    work.extend((len(articles), text, idx) for text, idx in zip(texts, indices))
+                    article["triples_list"] = triples_list
                     articles.append(article)
 
     print(f"{len(work)=}")
@@ -84,17 +89,12 @@ def main(data_dir: str, action: str = 'score', filter_score: float = 0.75, out_f
         work, batch_size=batch_size, async_fn=gpu_nli, n_proc=torch.cuda.device_count(),
     )
 
-    triple_counter = 0
-    last_article = -1
-    for (article_id, entailment_score) in tqdm(outputs, desc="entailment"):
-        if article_id != last_article:
-            last_article = article_id
-            triple_counter = 0
-        articles[article_id]["triples"][triple_counter]["confidence"] = entailment_score
-        triple_counter += 1
+    for (article_id, entailment_score, idx) in tqdm(outputs, desc="entailment"):
+        articles[article_id]["triples"][idx]["confidence"] = entailment_score
 
     if action == "filter":
         for article in tqdm(articles, desc="filter"):
+            article["triples"] = [triple for triple in article["triples"] if triple["confidence"] is not None]
             article["triples"] = [
                 triple for triple in article["triples"]
                 if triple["confidence"] >= filter_score or triple["predicate"]["uri"] in ["P569", "P570"]
